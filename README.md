@@ -13,7 +13,7 @@
 [![iOS, iOS Simulator](https://img.shields.io/static/v1?label=tested%20with&message=iOS%20%F0%9F%93%B1%20%7C%20iOS%20Simulator%20%F0%9F%93%B1&color=darkgreen&style=for-the-badge)](https://abhinavsingh.com/proxy-py-a-lightweight-single-file-http-proxy-server-in-python/)
 
 [![pypi version](https://img.shields.io/pypi/v/proxy.py?style=flat-square)](https://pypi.org/project/proxy.py/)
-[![Python 3.x](https://img.shields.io/static/v1?label=Python&message=3.6%20%7C%203.7%20%7C%203.8%20%7C%203.9%20%7C%203.10&color=blue&style=flat-square)](https://www.python.org/)
+[![Python 3.x](https://img.shields.io/static/v1?label=Python&message=3.6%20%7C%203.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11&color=blue&style=flat-square)](https://www.python.org/)
 [![Checked with mypy](https://img.shields.io/static/v1?label=MyPy&message=checked&color=blue&style=flat-square)](http://mypy-lang.org/)
 
 [![doc](https://img.shields.io/readthedocs/proxypy/latest?style=flat-square&color=darkgreen)](https://proxypy.readthedocs.io/)
@@ -59,6 +59,7 @@
     - [Proxy Pool Plugin](#proxypoolplugin)
     - [Filter By Client IP Plugin](#filterbyclientipplugin)
     - [Modify Chunk Response Plugin](#modifychunkresponseplugin)
+    - [Modify Request Header Plugin](#modifyrequestheaderplugin)
     - [Cloudflare DNS Resolver Plugin](#cloudflarednsresolverplugin)
     - [Custom DNS Resolver Plugin](#customdnsresolverplugin)
     - [Custom Network Interface](#customnetworkinterface)
@@ -71,6 +72,10 @@
 - [End-to-End Encryption](#end-to-end-encryption)
 - [TLS Interception](#tls-interception)
   - [TLS Interception With Docker](#tls-interception-with-docker)
+- [GROUT (NGROK Alternative)](#grout-ngrok-alternative)
+  - [Grout using Docker](#grout-using-docker)
+  - [How Grout works](#how-grout-works)
+  - [Self-hosted Grout](#self-hosted-grout)
 - [Proxy Over SSH Tunnel](#proxy-over-ssh-tunnel)
   - [Proxy Remote Requests Locally](#proxy-remote-requests-locally)
   - [Proxy Local Requests Remotely](#proxy-local-requests-remotely)
@@ -138,6 +143,7 @@
 [//]: # (DO-NOT-REMOVE-docs-badges-END)
 
 # Features
+- [A drop-in alternative to `ngrok`](#grout-ngrok-alternative)
 - Fast & Scalable
 
   - Scale up by using all available cores on the system
@@ -147,55 +153,67 @@
   - Made to handle `tens-of-thousands` connections / sec
 
     ```console
-    # On Macbook Pro 2019 / 2.4 GHz 8-Core Intel Core i9 / 32 GB RAM
-    ❯ ./helper/benchmark.sh
-      CONCURRENCY: 100 workers, TOTAL REQUESTS: 100000 req
-
+    # On Macbook Pro M2 2022
+    ❯ python --version
+    Python 3.11.8
+    ❯ oha --version
+    oha 1.4.3
+    ❯ ./benchmark/compare.sh
+      CONCURRENCY: 100 workers, DURATION: 1m, TIMEOUT: 1sec
+      =============================
+      Benchmarking Proxy.Py
+      Server (pid:75969) running
       Summary:
-        Success rate:	1.0000
-        Total:	2.5489 secs
-        Slowest:	0.0443 secs
-        Fastest:	0.0006 secs
-        Average:	0.0025 secs
-        Requests/sec:	39232.6572
+        Success rate: 100.00%
+        Total:        60.0006 secs
+        Slowest:      0.2525 secs
+        Fastest:      0.0002 secs
+        Average:      0.0019 secs
+        Requests/sec: 51667.3774
 
-        Total data:	1.81 MiB
-        Size/request:	19 B
-        Size/sec:	727.95 KiB
+        Total data:   56.17 MiB
+        Size/request: 19 B
+        Size/sec:     958.64 KiB
 
       Response time histogram:
-        0.001 [5006]  |■■■■■
-        0.001 [19740] |■■■■■■■■■■■■■■■■■■■■■
-        0.002 [29701] |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-        0.002 [21278] |■■■■■■■■■■■■■■■■■■■■■■
-        0.003 [15376] |■■■■■■■■■■■■■■■■
-        0.004 [6644]  |■■■■■■■
-        0.004 [1609]  |■
-        0.005 [434]   |
-        0.006 [83]    |
-        0.006 [29]    |
-        0.007 [100]   |
+        0.000 [1]       |
+        0.025 [3073746] |■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+        0.051 [10559]   |
+        0.076 [4980]    |
+        0.101 [2029]    |
+        0.126 [5896]    |
+        0.152 [2466]    |
+        0.177 [116]     |
+        0.202 [40]      |
+        0.227 [52]      |
+        0.253 [87]      |
 
-      Latency distribution:
-        10% in 0.0014 secs
-        25% in 0.0018 secs
-        50% in 0.0023 secs
-        75% in 0.0030 secs
-        90% in 0.0036 secs
-        95% in 0.0040 secs
-        99% in 0.0047 secs
+      Response time distribution:
+        10.00% in 0.0005 secs
+        25.00% in 0.0007 secs
+        50.00% in 0.0009 secs
+        75.00% in 0.0014 secs
+        90.00% in 0.0021 secs
+        95.00% in 0.0035 secs
+        99.00% in 0.0198 secs
+        99.90% in 0.1262 secs
+        99.99% in 0.1479 secs
 
       Details (average, fastest, slowest):
-        DNS+dialup:	0.0025 secs, 0.0015 secs, 0.0030 secs
-        DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0001 secs
+        DNS+dialup:   0.0018 secs, 0.0004 secs, 0.0031 secs
+        DNS-lookup:   0.0000 secs, 0.0000 secs, 0.0002 secs
 
       Status code distribution:
-        [200] 100000 responses
+        [200] 3099972 responses
+
+      Error distribution:
+        [100] aborted due to deadline
+      =============================
     ```
 
     Consult [Threads vs Threadless](#threads-vs-threadless) and [Threadless Remote vs Local Execution Mode](#threadless-remote-vs-local-execution-mode) to control number of CPU cores utilized.
 
-    See [Benchmark](https://github.com/abhinavsingh/proxy.py/tree/develop/benchmark#readme) for more details and for how to run benchmarks locally.
+    See [Benchmark](https://github.com/abhinavsingh/proxy.py/blob/develop/benchmark/README.md) for more details and for how to run benchmarks locally.
 
 - Lightweight
   - Uses only `~5-20 MB` RAM
@@ -213,7 +231,8 @@
     - `--enable-reverse-proxy --plugins proxy.plugin.ReverseProxyPlugin`
   - Plugin API is currently in *development phase*. Expect breaking changes. See [Deploying proxy.py in production](#deploying-proxypy-in-production) on how to ensure reliability across code changes.
 
-- Can listen on multiple ports
+- Can listen on multiple addresses and ports
+  - Use `--hostnames` flag to provide additional addresses
   - Use `--ports` flag to provide additional ports
   - Optionally, use `--port` flag to override default port `8899`
   - Capable of serving multiple protocols over the same port
@@ -914,6 +933,31 @@ plugin
 
 Modify `ModifyChunkResponsePlugin` to your taste. Example, instead of sending hard-coded chunks, parse and modify the original `JSON` chunks received from the upstream server.
 
+### ModifyRequestHeaderPlugin
+
+This plugin demonstrate how to modify outgoing HTTPS request headers under TLS interception mode.
+
+Start `proxy.py` as:
+
+```console
+❯ proxy \
+    --plugins proxy.plugin.ModifyRequestHeaderPlugin \
+    ... [TLS interception flags] ...
+```
+
+Verify using `curl -x localhost:8899 --cacert ca-cert.pem https://httpbin.org/get`:
+
+```console
+{
+  "args": {},
+  "headers": {
+    ... [redacted] ...,
+    "X-Proxy-Py-Version": "2.4.4rc6.dev15+gf533c711"
+  },
+  ... [redacted] ...
+}
+```
+
 ### CloudflareDnsResolverPlugin
 
 This plugin uses `Cloudflare` hosted `DNS-over-HTTPS` [API](https://developers.cloudflare.com/1.1.1.1/encrypted-dns/dns-over-https/make-api-requests/dns-json) (json).
@@ -1277,6 +1321,92 @@ with TLS Interception:
    }
    ```
 
+# GROUT (NGROK Alternative)
+
+`grout` is a drop-in alternative to `ngrok` that comes packaged within `proxy.py`
+
+```console
+❯ grout
+NAME:
+  grout - securely tunnel local files, folders and services to public URLs
+
+USAGE:
+  grout route [name]
+
+DESCRIPTION:
+  grout exposes local networked services behinds NATs and firewalls to the
+  public internet over a secure tunnel. Share local folders, directories and websites,
+  build/test webhook consumers and self-host personal services to public URLs.
+
+EXAMPLES:
+  Share Files and Folders:
+    grout C:\path\to\folder                          # Share a folder on your system
+    grout /path/to/folder                            # Share a folder on your system
+    grout /path/to/folder --basic-auth user:pass     # Add authentication for shared folder
+    grout /path/to/photo.jpg                         # Share a specific file on your system
+
+  Expose HTTP, HTTPS and Websockets:
+    grout http://localhost:9090                      # Expose HTTP service running on port 9090
+    grout https://localhost:8080                     # Expose HTTPS service running on port 8080
+    grout https://localhost:8080 --path /worker/     # Expose only certain paths of HTTPS service on port 8080
+    grout https://localhost:8080 --basic-auth u:p    # Add authentication for exposed HTTPS service on port 8080
+
+  Expose TCP Services:
+    grout tcp://:6379                                # Expose Redis service running locally on port 6379
+    grout tcp://:22                                  # Expose SSH service running locally on port 22
+
+  Custom URLs:
+    grout https://localhost:8080 abhinavsingh        # Custom URL for HTTPS service running on port 8080
+    grout tcp://:22 abhinavsingh                     # Custom URL for SSH service running locally on port 22
+
+  Custom Domains:
+    grout tcp://:5432 abhinavsingh.domain.tld        # Custom URL for Postgres service running locally on port 5432
+
+  Self-hosted solutions:
+    grout tcp://:5432 abhinavsingh.my.server         # Custom URL for Postgres service running locally on port 5432
+
+SUPPORT:
+  Write to us at support@jaxl.com
+
+  Privacy policy and Terms & conditions
+  https://jaxl.com/privacy/
+
+  Created by Jaxl™
+  https://jaxl.io
+```
+
+## Grout using Docker
+
+```console
+❯ docker run -it \
+  --entrypoint grout \
+  --rm -v ~/.proxy:/root/.proxy \
+  abhinavsingh/proxy.py:latest \
+  http://host.docker.internal:29876
+```
+
+Above:
+
+- We changed `--entrypoint` to `grout`
+- We replaced `localhost` with `host.docker.internal`, so that `grout` can route traffic to port `29876` running on the host machine
+- *(Optional)* Mount host machine `~/.proxy` folder, so that `grout` credentials can persist across container restarts
+
+## How Grout works
+
+- `grout` infrastructure has 2 components: client and server
+- `grout` client has 2 components: a thin and a thick client
+- `grout` thin client is part of open source `proxy.py` (BSD 3-Clause License)
+- `grout` thick client and servers are hosted at [jaxl.io](https://jaxl.io)
+  and a copyright of [Jaxl Innovations Private Limited](https://jaxl.com)
+- `grout` server has 3 components: a registry server, a reverse proxy server and a tunnel server
+
+## Self-Hosted `grout`
+
+- `grout` thick client and servers can also be hosted on your GCP, AWS, Cloud infrastructures
+- With a self-hosted version, your traffic flows through the network you control and trust
+- `grout` developers at [jaxl.io](https://jaxl.io) provides GCP, AWS, Docker images for self-hosted solutions
+- Please drop an email at [support@jaxl.com](mailto:support@jaxl.com) to get started.
+
 # Proxy Over SSH Tunnel
 
 **This is a WIP and may not work as documented**
@@ -1290,17 +1420,16 @@ See [requirements-tunnel.txt](https://github.com/abhinavsingh/proxy.py/blob/deve
                             |
     +------------+          |            +----------+
     |   LOCAL    |          |            |  REMOTE  |
-    |   HOST     | <== SSH ==== :8900 == |  SERVER  |
+    |   HOST     | <== SSH ==== :8900 == |  PROXY   |
     +------------+          |            +----------+
     :8899 proxy.py          |
                             |
                          FIREWALL
                       (allow tcp/22)
 
-## What
+### What
 
-Proxy HTTP(s) requests made on a `remote` server through `proxy.py` server
-running on `localhost`.
+Proxy HTTP(s) requests made on a `remote` proxy server through `proxy.py` server running on `localhost`.
 
 ### How
 
@@ -1322,7 +1451,7 @@ Start `proxy.py` as:
 
 ```console
 ❯ # On localhost
-❯ proxy --enable-tunnel \
+❯ proxy --enable-ssh-tunnel \
     --tunnel-username username \
     --tunnel-hostname ip.address.or.domain.name \
     --tunnel-port 22 \
@@ -2321,32 +2450,35 @@ See [Benchmark](https://github.com/abhinavsingh/proxy.py/tree/develop/benchmark)
 To run standalone benchmark for `proxy.py`, use the following command from repo root:
 
 ```console
-❯ ./helper/benchmark.sh
+❯ ./benchmark/compare.sh
 ```
 
 # Flags
 
 ```console
 ❯ proxy -h
-usage: -m [-h] [--tunnel-hostname TUNNEL_HOSTNAME] [--tunnel-port TUNNEL_PORT]
+usage: -m [-h] [--enable-proxy-protocol] [--threadless] [--threaded]
+          [--num-workers NUM_WORKERS] [--enable-events] [--enable-conn-pool]
+          [--key-file KEY_FILE] [--cert-file CERT_FILE]
+          [--client-recvbuf-size CLIENT_RECVBUF_SIZE]
+          [--server-recvbuf-size SERVER_RECVBUF_SIZE]
+          [--max-sendbuf-size MAX_SENDBUF_SIZE] [--timeout TIMEOUT]
+          [--tunnel-hostname TUNNEL_HOSTNAME] [--tunnel-port TUNNEL_PORT]
           [--tunnel-username TUNNEL_USERNAME]
           [--tunnel-ssh-key TUNNEL_SSH_KEY]
           [--tunnel-ssh-key-passphrase TUNNEL_SSH_KEY_PASSPHRASE]
-          [--tunnel-remote-port TUNNEL_REMOTE_PORT] [--threadless]
-          [--threaded] [--num-workers NUM_WORKERS] [--enable-events]
+          [--tunnel-remote-port TUNNEL_REMOTE_PORT]
           [--local-executor LOCAL_EXECUTOR] [--backlog BACKLOG]
-          [--hostname HOSTNAME] [--port PORT] [--ports PORTS [PORTS ...]]
-          [--port-file PORT_FILE] [--unix-socket-path UNIX_SOCKET_PATH]
+          [--hostname HOSTNAME] [--hostnames HOSTNAMES [HOSTNAMES ...]]
+          [--port PORT] [--ports PORTS [PORTS ...]] [--port-file PORT_FILE]
+          [--unix-socket-path UNIX_SOCKET_PATH]
           [--num-acceptors NUM_ACCEPTORS] [--version] [--log-level LOG_LEVEL]
           [--log-file LOG_FILE] [--log-format LOG_FORMAT]
           [--open-file-limit OPEN_FILE_LIMIT]
           [--plugins PLUGINS [PLUGINS ...]] [--enable-dashboard]
           [--basic-auth BASIC_AUTH] [--enable-ssh-tunnel]
           [--work-klass WORK_KLASS] [--pid-file PID_FILE] [--openssl OPENSSL]
-          [--enable-proxy-protocol] [--enable-conn-pool] [--key-file KEY_FILE]
-          [--cert-file CERT_FILE] [--client-recvbuf-size CLIENT_RECVBUF_SIZE]
-          [--server-recvbuf-size SERVER_RECVBUF_SIZE]
-          [--max-sendbuf-size MAX_SENDBUF_SIZE] [--timeout TIMEOUT]
+          [--data-dir DATA_DIR] [--ssh-listener-klass SSH_LISTENER_KLASS]
           [--disable-http-proxy] [--disable-headers DISABLE_HEADERS]
           [--ca-key-file CA_KEY_FILE] [--ca-cert-dir CA_CERT_DIR]
           [--ca-cert-file CA_CERT_FILE] [--ca-file CA_FILE]
@@ -2364,10 +2496,45 @@ usage: -m [-h] [--tunnel-hostname TUNNEL_HOSTNAME] [--tunnel-port TUNNEL_PORT]
           [--filtered-client-ips FILTERED_CLIENT_IPS]
           [--filtered-url-regex-config FILTERED_URL_REGEX_CONFIG]
 
-proxy.py v2.4.4rc4.dev6+g4ee982a.d20221022
+proxy.py v2.4.4rc6.dev191+gef5a8922
 
 options:
   -h, --help            show this help message and exit
+  --enable-proxy-protocol
+                        Default: False. If used, will enable proxy protocol.
+                        Only version 1 is currently supported.
+  --threadless          Default: True. Enabled by default on Python 3.8+ (mac,
+                        linux). When disabled a new thread is spawned to
+                        handle each client connection.
+  --threaded            Default: False. Disabled by default on Python < 3.8
+                        and windows. When enabled a new thread is spawned to
+                        handle each client connection.
+  --num-workers NUM_WORKERS
+                        Defaults to number of CPU cores.
+  --enable-events       Default: False. Enables core to dispatch lifecycle
+                        events. Plugins can be used to subscribe for core
+                        events.
+  --enable-conn-pool    Default: False. (WIP) Enable upstream connection
+                        pooling.
+  --key-file KEY_FILE   Default: None. Server key file to enable end-to-end
+                        TLS encryption with clients. If used, must also pass
+                        --cert-file.
+  --cert-file CERT_FILE
+                        Default: None. Server certificate to enable end-to-end
+                        TLS encryption with clients. If used, must also pass
+                        --key-file.
+  --client-recvbuf-size CLIENT_RECVBUF_SIZE
+                        Default: 128 KB. Maximum amount of data received from
+                        the client in a single recv() operation.
+  --server-recvbuf-size SERVER_RECVBUF_SIZE
+                        Default: 128 KB. Maximum amount of data received from
+                        the server in a single recv() operation.
+  --max-sendbuf-size MAX_SENDBUF_SIZE
+                        Default: 64 KB. Maximum amount of data to flush in a
+                        single send() operation.
+  --timeout TIMEOUT     Default: 10.0. Number of seconds after which an
+                        inactive connection must be dropped. Inactivity is
+                        defined by no data sent or received by the client.
   --tunnel-hostname TUNNEL_HOSTNAME
                         Default: None. Remote hostname or IP address to which
                         SSH tunnel will be established.
@@ -2383,17 +2550,6 @@ options:
   --tunnel-remote-port TUNNEL_REMOTE_PORT
                         Default: 8899. Remote port which will be forwarded
                         locally for proxy.
-  --threadless          Default: True. Enabled by default on Python 3.8+ (mac,
-                        linux). When disabled a new thread is spawned to
-                        handle each client connection.
-  --threaded            Default: False. Disabled by default on Python < 3.8
-                        and windows. When enabled a new thread is spawned to
-                        handle each client connection.
-  --num-workers NUM_WORKERS
-                        Defaults to number of CPU cores.
-  --enable-events       Default: False. Enables core to dispatch lifecycle
-                        events. Plugins can be used to subscribe for core
-                        events.
   --local-executor LOCAL_EXECUTOR
                         Default: 1. Enabled by default. Use 0 to disable. When
                         enabled acceptors will make use of local (same
@@ -2405,6 +2561,8 @@ options:
   --backlog BACKLOG     Default: 100. Maximum number of pending connections to
                         proxy server.
   --hostname HOSTNAME   Default: 127.0.0.1. Server IP address.
+  --hostnames HOSTNAMES [HOSTNAMES ...]
+                        Default: None. Additional IP addresses to listen on.
   --port PORT           Default: 8899. Server port. To listen on more ports,
                         pass them using --ports flag.
   --ports PORTS [PORTS ...]
@@ -2443,30 +2601,10 @@ options:
   --pid-file PID_FILE   Default: None. Save "parent" process ID to a file.
   --openssl OPENSSL     Default: openssl. Path to openssl binary. By default,
                         assumption is that openssl is in your PATH.
-  --enable-proxy-protocol
-                        Default: False. If used, will enable proxy protocol.
-                        Only version 1 is currently supported.
-  --enable-conn-pool    Default: False. (WIP) Enable upstream connection
-                        pooling.
-  --key-file KEY_FILE   Default: None. Server key file to enable end-to-end
-                        TLS encryption with clients. If used, must also pass
-                        --cert-file.
-  --cert-file CERT_FILE
-                        Default: None. Server certificate to enable end-to-end
-                        TLS encryption with clients. If used, must also pass
-                        --key-file.
-  --client-recvbuf-size CLIENT_RECVBUF_SIZE
-                        Default: 128 KB. Maximum amount of data received from
-                        the client in a single recv() operation.
-  --server-recvbuf-size SERVER_RECVBUF_SIZE
-                        Default: 128 KB. Maximum amount of data received from
-                        the server in a single recv() operation.
-  --max-sendbuf-size MAX_SENDBUF_SIZE
-                        Default: 64 KB. Maximum amount of data to flush in a
-                        single send() operation.
-  --timeout TIMEOUT     Default: 10.0. Number of seconds after which an
-                        inactive connection must be dropped. Inactivity is
-                        defined by no data sent or received by the client.
+  --data-dir DATA_DIR   Default: ~/.proxypy. Path to proxypy data directory.
+  --ssh-listener-klass SSH_LISTENER_KLASS
+                        Default: proxy.core.ssh.listener.SshTunnelListener. An
+                        implementation of BaseSshTunnelListener
   --disable-http-proxy  Default: False. Whether to disable
                         proxy.HttpProxyPlugin.
   --disable-headers DISABLE_HEADERS
@@ -2485,9 +2623,9 @@ options:
                         Default: None. Signing certificate to use for signing
                         dynamically generated HTTPS certificates. If used,
                         must also pass --ca-key-file and --ca-signing-key-file
-  --ca-file CA_FILE     Default: /Users/abhinavsingh/Dev/proxy.py/.venv/lib/py
-                        thon3.10/site-packages/certifi/cacert.pem. Provide
-                        path to custom CA bundle for peer certificate
+  --ca-file CA_FILE     Default: /Users/abhinavsingh/Dev/proxy.py/.venv31013/l
+                        ib/python3.10/site-packages/certifi/cacert.pem.
+                        Provide path to custom CA bundle for peer certificate
                         verification
   --ca-signing-key-file CA_SIGNING_KEY_FILE
                         Default: None. CA signing key to use for dynamic

@@ -186,12 +186,8 @@ class Acceptor(multiprocessing.Process):
         # dynamically accept from new fds.
         for _ in range(self.fd_queue.recv()):
             fileno = recv_handle(self.fd_queue)
-            # TODO: Convert to socks i.e. list of fds
-            self.socks[fileno] = socket.fromfd(
-                fileno,
-                family=self.flags.family,
-                type=socket.SOCK_STREAM,
-            )
+            sock = socket.socket(fileno=socket.dup(fileno))  # type: ignore[attr-defined]
+            self.socks[fileno] = sock
         self.fd_queue.close()
 
     def _start_local(self) -> None:
@@ -246,7 +242,7 @@ class Acceptor(multiprocessing.Process):
                 conn,
                 addr,
                 event_queue=self.event_queue,
-                publisher_id=self.__class__.__name__,
+                publisher_id=self.__class__.__qualname__,
             )
             # TODO: Move me into target method
             logger.debug(   # pragma: no cover

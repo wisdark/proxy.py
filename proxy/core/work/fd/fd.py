@@ -9,7 +9,9 @@
     :license: BSD, see LICENSE for more details.
 """
 import socket
+import asyncio
 import logging
+from abc import abstractmethod
 from typing import Any, TypeVar, Optional
 
 from ...event import eventNames
@@ -30,16 +32,13 @@ class ThreadlessFdExecutor(Threadless[T]):
         fileno: int = args[0]
         addr: Optional[HostPort] = args[1]
         conn: Optional[TcpOrTlsSocket] = args[2]
-        conn = conn or socket.fromfd(
-            fileno, family=socket.AF_INET if self.flags.hostname.version == 4 else socket.AF_INET6,
-            type=socket.SOCK_STREAM,
-        )
+        conn = conn or socket.socket(fileno=socket.dup(fileno))  # type: ignore[attr-defined]
         uid = '%s-%s-%s' % (self.iid, self._total, fileno)
         self.works[fileno] = self.create(uid, conn, addr)
         self.works[fileno].publish_event(
             event_name=eventNames.WORK_STARTED,
             event_payload={'fileno': fileno, 'addr': addr},
-            publisher_id=self.__class__.__name__,
+            publisher_id=self.__class__.__qualname__,
         )
         try:
             self.works[fileno].initialize()
@@ -50,3 +49,16 @@ class ThreadlessFdExecutor(Threadless[T]):
                 exc_info=e,
             )
             self._cleanup(fileno)
+
+    @property
+    @abstractmethod
+    def loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def receive_from_work_queue(self) -> bool:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def work_queue_fileno(self) -> Optional[int]:
+        raise NotImplementedError()

@@ -13,13 +13,17 @@
        Lua
 """
 import re
-from typing import List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
 
 from ..http import Url
 from ..http.parser import HttpParser
 from ..http.server import ReverseProxyBasePlugin
 from ..common.types import RePattern
 from ..http.exception.base import HttpProtocolException
+
+
+if TYPE_CHECKING:
+    from ..core.connection import TcpServerConnection
 
 
 class ReverseProxyPlugin(ReverseProxyBasePlugin):
@@ -41,7 +45,7 @@ class ReverseProxyPlugin(ReverseProxyBasePlugin):
             # A static route
             (
                 r'/get$',
-                [b'http://httpbin.org/get', b'https://httpbin.org/get'],
+                [b'http://httpbingo.org/get', b'https://httpbingo.org/get'],
             ),
             # A dynamic route to catch requests on "/get/<int>""
             # See "handle_route" method below for what we do when
@@ -49,11 +53,15 @@ class ReverseProxyPlugin(ReverseProxyBasePlugin):
             r'/get/(\d+)$',
         ]
 
-    def handle_route(self, request: HttpParser, pattern: RePattern) -> Url:
+    def handle_route(
+        self,
+        request: HttpParser,
+        pattern: RePattern,
+    ) -> Union[memoryview, Url, 'TcpServerConnection']:
         """For our example dynamic route, we want to simply convert
         any incoming request to "/get/1" into "/get?id=1" when serving from upstream.
         """
-        choice: Url = Url.from_bytes(b'http://httpbin.org/get')
+        choice: Url = Url.from_bytes(b'http://httpbingo.org/get')
         assert request.path
         result = re.search(pattern, request.path.decode())
         if not result or len(result.groups()) != 1:
