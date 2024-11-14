@@ -103,7 +103,7 @@ class Threadless(ABC, Generic[T]):
         ] = {}
         self.wait_timeout: float = DEFAULT_WAIT_FOR_TASKS_TIMEOUT
         self.cleanup_inactive_timeout: float = float(
-            self.flags.inactive_conn_cleanup_timeout
+            self.flags.inactive_conn_cleanup_timeout,
         )
         self._total: int = 0
         # When put at the top, causes circular import error
