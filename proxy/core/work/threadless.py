@@ -333,10 +333,17 @@ class Threadless(ABC, Generic[T]):
                 self.selector.unregister(fileno)
             self.registered_events_by_work_ids[work_id].clear()
             del self.registered_events_by_work_ids[work_id]
-        self.works[work_id].shutdown()
-        del self.works[work_id]
-        if self.work_queue_fileno() is not None:
-            os.close(work_id)
+        try:
+            self.works[work_id].shutdown()
+        except Exception as exc:
+            logger.exception(
+                'Error when shutting down work#{0}'.format(work_id),
+                exc_info=exc,
+            )
+        finally:
+            del self.works[work_id]
+            if self.work_queue_fileno() is not None:
+                os.close(work_id)
 
     def _create_tasks(
             self,
