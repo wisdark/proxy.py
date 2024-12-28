@@ -21,7 +21,7 @@ import socket
 import logging
 import threading
 import subprocess
-from typing import Any, Dict, List, Union, Optional, cast
+from typing import Any, Dict, List, Union, Optional
 
 from .plugin import HttpProxyBasePlugin
 from ..parser import HttpParser, httpParserTypes, httpParserStates
@@ -35,7 +35,7 @@ from ...common.pki import gen_csr, sign_csr, gen_public_key
 from ...core.event import eventNames
 from ...common.flag import flags
 from ...common.types import Readables, Writables, Descriptors
-from ...common.utils import text_
+from ...common.utils import text_, cert_der_to_dict
 from ...core.connection import (
     TcpServerConnection, TcpConnectionUninitializedException,
 )
@@ -43,7 +43,8 @@ from ...common.constants import (
     COMMA, DEFAULT_CA_FILE, PLUGIN_PROXY_AUTH, DEFAULT_CA_CERT_DIR,
     DEFAULT_CA_KEY_FILE, DEFAULT_CA_CERT_FILE, DEFAULT_DISABLE_HEADERS,
     PROXY_AGENT_HEADER_VALUE, DEFAULT_DISABLE_HTTP_PROXY,
-    DEFAULT_CA_SIGNING_KEY_FILE, DEFAULT_HTTP_PROXY_ACCESS_LOG_FORMAT,
+    DEFAULT_CA_SIGNING_KEY_FILE, DEFAULT_INSECURE_TLS_INTERCEPTION,
+    DEFAULT_HTTP_PROXY_ACCESS_LOG_FORMAT,
     DEFAULT_HTTPS_PROXY_ACCESS_LOG_FORMAT,
 )
 
@@ -72,6 +73,13 @@ flags.add_argument(
     default=DEFAULT_CA_KEY_FILE,
     help='Default: None. CA key to use for signing dynamically generated '
     'HTTPS certificates.  If used, must also pass --ca-cert-file and --ca-signing-key-file',
+)
+
+flags.add_argument(
+    '--insecure-tls-interception',
+    action='store_true',
+    default=DEFAULT_INSECURE_TLS_INTERCEPTION,
+    help='Default: False. Disables certificate verification',
 )
 
 flags.add_argument(
@@ -273,10 +281,7 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
             # only for non-https requests and when
             # tls interception is enabled
             if raw is not None:
-                if (
-                    not self.request.is_https_tunnel
-                    or self.tls_interception_enabled
-                ):
+                if not self.request.is_https_tunnel or self._tls_intercept_enabled:
                     if self.response.is_complete:
                         self.handle_pipeline_response(raw)
                     else:
@@ -421,8 +426,7 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
             # We also handle pipeline scenario for https proxy
             # requests is TLS interception is enabled.
             if self.request.is_complete and (
-                    not self.request.is_https_tunnel or
-                    self.tls_interception_enabled
+                not self.request.is_https_tunnel or self._tls_intercept_enabled
             ):
                 if self.pipeline_request is not None and \
                         self.pipeline_request.is_connection_upgrade:
@@ -466,6 +470,20 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
             else:
                 self.upstream.queue(raw)
 
+    @property
+    def _tls_intercept_enabled(self) -> bool:
+        do_intercept = self.tls_interception_enabled
+        if not do_intercept:
+            return do_intercept
+        # If enabled by flags, check if a plugin wants us to bypass
+        # interception for this particular request
+        for plugin in self.plugins.values():
+            do_intercept = plugin.do_intercept(self.request)
+            # A plugin requested to not intercept the request
+            if do_intercept is False:
+                break
+        return do_intercept
+
     def on_request_complete(self) -> Union[socket.socket, bool]:
         self.emit_request_complete()
 
@@ -502,19 +520,8 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
         if self.upstream:
             if self.request.is_https_tunnel:
                 self.client.queue(PROXY_TUNNEL_ESTABLISHED_RESPONSE_PKT)
-                if self.tls_interception_enabled:
-                    # Check if any plugin wants to
-                    # disable interception even
-                    # with flags available
-                    do_intercept = True
-                    for plugin in self.plugins.values():
-                        do_intercept = plugin.do_intercept(self.request)
-                        # A plugin requested to not intercept
-                        # the request
-                        if do_intercept is False:
-                            break
-                    if do_intercept:
-                        return self.intercept()
+                if self._tls_intercept_enabled:
+                    return self.intercept()
             # If an upstream server connection was established for http request,
             # queue the request for upstream server.
             else:
@@ -760,10 +767,17 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
         assert isinstance(self.upstream.connection, socket.socket)
         do_close = False
         try:
+            # pylint: disable=E1101
+            verify_mode = (
+                ssl.VerifyMode.CERT_NONE
+                if self.flags.insecure_tls_interception
+                else ssl.VerifyMode.CERT_REQUIRED
+            )
             self.upstream.wrap(
                 text_(self.request.host),
                 self.flags.ca_file,
                 as_non_blocking=True,
+                verify_mode=verify_mode,
             )
         except ssl.SSLCertVerificationError:    # Server raised certificate verification error
             # When --disable-interception-on-ssl-cert-verification-error flag is on,
@@ -802,7 +816,7 @@ class HttpProxyPlugin(HttpProtocolHandlerPlugin):
         try:
             # TODO: Perform async certificate generation
             generated_cert = self.generate_upstream_certificate(
-                cast(Dict[str, Any], self.upstream.connection.getpeercert()),
+                cert_der_to_dict(self.upstream.connection.getpeercert(True)),
             )
             self.client.wrap(self.flags.ca_signing_key_file, generated_cert)
         except subprocess.TimeoutExpired as e:  # Popen communicate timeout

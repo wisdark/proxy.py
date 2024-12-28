@@ -20,6 +20,7 @@ import getpass
 import logging
 import argparse
 import threading
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Type, Tuple, Optional, cast
 
 from .core.ssh import SshTunnelListener, SshHttpProtocolHandler
@@ -28,6 +29,7 @@ from .core.event import EventManager
 from .http.codes import httpStatusCodes
 from .common.flag import FlagParser, flags
 from .http.client import client
+from .common.types import HostPort
 from .common.utils import bytes_
 from .core.work.fd import RemoteFdExecutor
 from .http.methods import httpMethods
@@ -43,6 +45,8 @@ from .common.constants import (
     DEFAULT_ENABLE_DASHBOARD, DEFAULT_ENABLE_SSH_TUNNEL,
     DEFAULT_SSH_LISTENER_KLASS,
 )
+from .core.event.metrics import MetricsEventSubscriber
+from .http.parser.parser import HttpParser
 
 
 if TYPE_CHECKING:   # pragma: no cover
@@ -204,6 +208,7 @@ class Proxy:
         self.acceptors: Optional[AcceptorPool] = None
         self.event_manager: Optional[EventManager] = None
         self.ssh_tunnel_listener: Optional[BaseSshTunnelListener] = None
+        self.metrics_subscriber: Optional[MetricsEventSubscriber] = None
 
     def __enter__(self) -> 'Proxy':
         self.setup()
@@ -221,9 +226,6 @@ class Proxy:
         #
         # TODO: Python shell within running proxy.py environment
         # https://github.com/abhinavsingh/proxy.py/discussions/1021
-        #
-        # TODO: Near realtime resource / stats monitoring
-        # https://github.com/abhinavsingh/proxy.py/discussions/1023
         #
         self._write_pid_file()
         # We setup listeners first because of flags.port override
@@ -259,9 +261,9 @@ class Proxy:
             logger.info('Core Event enabled')
             self.event_manager = EventManager()
             self.event_manager.setup()
-        event_queue = self.event_manager.queue \
-            if self.event_manager is not None \
-            else None
+        event_queue = (
+            self.event_manager.queue if self.event_manager is not None else None
+        )
         # Setup remote executors only if
         # --local-executor mode isn't enabled.
         if self.remote_executors_enabled:
@@ -287,6 +289,12 @@ class Proxy:
                 flags=self.flags,
                 **self.opts,
             )
+        if event_queue is not None and self.flags.enable_metrics:
+            self.metrics_subscriber = MetricsEventSubscriber(
+                event_queue,
+                self.flags.metrics_lock,
+            )
+            self.metrics_subscriber.setup()
         # TODO: May be close listener fd as we don't need it now
         if threading.current_thread() == threading.main_thread():
             self._register_signals()
@@ -309,6 +317,8 @@ class Proxy:
         return tunnel
 
     def shutdown(self) -> None:
+        if self.metrics_subscriber is not None:
+            self.metrics_subscriber.shutdown()
         if self.flags.enable_ssh_tunnel:
             assert self.ssh_tunnel_listener is not None
             self.ssh_tunnel_listener.shutdown()
@@ -466,10 +476,11 @@ def grout() -> None:  # noqa: C901
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument('route', nargs='?', default=None)
         parser.add_argument('name', nargs='?', default=None)
+        parser.add_argument('--wildcard', action='store_true', help='Enable wildcard')
         args, _remaining_args = parser.parse_known_args()
         grout_tld = default_grout_tld
         if args.name is not None and '.' in args.name:
-            grout_tld = args.name.split('.', maxsplit=1)[1]
+            grout_tld = args.name if args.wildcard else args.name.split('.', maxsplit=1)[1]
         grout_tld_parts = grout_tld.split(':')
         tld_host = grout_tld_parts[0]
         tld_port = 443
@@ -501,3 +512,35 @@ def grout() -> None:  # noqa: C901
     assert env is not None
     print('\r' + ' ' * 70 + '\r', end='', flush=True)
     Plugins.from_bytes(env['m'].encode(), name='client').grout(env=env['e'])  # type: ignore[attr-defined]
+
+
+class GroutClientBasePlugin(ABC):
+    """Base class for dynamic grout client rules.
+
+    Implementation of this class must be stateless because a new instance is created
+    for every route decision making.
+    """
+
+    @abstractmethod
+    def resolve_route(
+        self,
+        route: str,
+        request: HttpParser,
+        origin: HostPort,
+        server: HostPort,
+    ) -> Tuple[Optional[str], HttpParser]:
+        """Returns a valid grout route string.
+
+        You MUST override this method.  This method returns 2-tuple where
+        first value is the "route" and second the "request" object.
+
+        For a simple pass through, simply return the "route" argument value itself.
+        You can also return a dynamic value based upon "request" and "origin" information.
+        E.g. sending to different upstream services based upon request Host header.
+        Return None as "route" value to drop the request.
+
+        You can also modify the original request object and return.  Common examples
+        include strip-path scenario, where you would like to strip the path before
+        sending the request to upstream.
+        """
+        raise NotImplementedError()

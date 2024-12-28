@@ -30,6 +30,7 @@ from proxy.http.responses import PROXY_TUNNEL_ESTABLISHED_RESPONSE_PKT
 from proxy.core.connection import TcpServerConnection
 from proxy.common.constants import DEFAULT_CA_FILE
 from ...test_assertions import Assertions
+from ...certificates.test_cert_data import mock_cert
 
 
 class TestHttpProxyTlsInterception(Assertions):
@@ -59,12 +60,13 @@ class TestHttpProxyTlsInterception(Assertions):
         # Used for server side wrapping
         self.mock_ssl_context = mocker.patch('ssl.create_default_context')
         upstream_tls_sock = mock.MagicMock(spec=ssl.SSLSocket)
+        upstream_tls_sock.getpeercert = mock_cert
         self.mock_ssl_context.return_value.wrap_socket.return_value = upstream_tls_sock
 
         # Used for client wrapping
-        self.mock_ssl_wrap = mocker.patch('ssl.wrap_socket')
+        self.mock_ssl_wrap = mocker.patch('ssl.SSLContext')
         client_tls_sock = mock.MagicMock(spec=ssl.SSLSocket)
-        self.mock_ssl_wrap.return_value = client_tls_sock
+        self.mock_ssl_wrap.return_value.wrap_socket.return_value = client_tls_sock
 
         plain_connection = mock.MagicMock(spec=socket.socket)
 
@@ -75,8 +77,8 @@ class TestHttpProxyTlsInterception(Assertions):
 
         # Do not mock the original wrap method
         self.mock_server_conn.return_value.wrap.side_effect = \
-            lambda x, y, as_non_blocking: TcpServerConnection.wrap(
-                self.mock_server_conn.return_value, x, y, as_non_blocking=as_non_blocking,
+            lambda x, y, as_non_blocking, verify_mode: TcpServerConnection.wrap(
+                self.mock_server_conn.return_value, x, y, as_non_blocking=as_non_blocking, verify_mode=verify_mode,
             )
 
         type(self.mock_server_conn.return_value).connection = \
@@ -251,13 +253,18 @@ class TestHttpProxyTlsInterception(Assertions):
         )
         assert self.flags.ca_cert_dir is not None
         self.mock_ssl_wrap.assert_called_with(
-            self._conn,
-            server_side=True,
+            protocol=ssl.PROTOCOL_TLS_SERVER,
+        )
+        self.mock_ssl_wrap.return_value.load_cert_chain(
             keyfile=self.flags.ca_signing_key_file,
             certfile=HttpProxyPlugin.generated_cert_file_path(
-                self.flags.ca_cert_dir, host,
+                self.flags.ca_cert_dir,
+                host,
             ),
-            ssl_version=ssl.PROTOCOL_TLS,
+        )
+        self.mock_ssl_wrap.return_value.wrap_socket.assert_called_with(
+            self._conn,
+            server_side=True,
         )
         self.assertEqual(self._conn.setblocking.call_count, 2)
         self.assertEqual(
@@ -290,7 +297,7 @@ class TestHttpProxyTlsInterception(Assertions):
             self.proxy_plugin.return_value.handle_client_request.call_count,
             2,
         )
-        self.proxy_plugin.return_value.do_intercept.assert_called_once()
+        self.assertEqual(self.proxy_plugin.return_value.do_intercept.call_count, 2)
 
         callback_request = \
             self.proxy_plugin.return_value.handle_client_request.call_args_list[1][0][0]

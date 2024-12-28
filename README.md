@@ -13,7 +13,7 @@
 [![iOS, iOS Simulator](https://img.shields.io/static/v1?label=tested%20with&message=iOS%20%F0%9F%93%B1%20%7C%20iOS%20Simulator%20%F0%9F%93%B1&color=darkgreen&style=for-the-badge)](https://abhinavsingh.com/proxy-py-a-lightweight-single-file-http-proxy-server-in-python/)
 
 [![pypi version](https://img.shields.io/pypi/v/proxy.py?style=flat-square)](https://pypi.org/project/proxy.py/)
-[![Python 3.x](https://img.shields.io/static/v1?label=Python&message=3.6%20%7C%203.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11&color=blue&style=flat-square)](https://www.python.org/)
+[![Python 3.x](https://img.shields.io/static/v1?label=Python&message=3.6%20%7C%203.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12&color=blue&style=flat-square)](https://www.python.org/)
 [![Checked with mypy](https://img.shields.io/static/v1?label=MyPy&message=checked&color=blue&style=flat-square)](http://mypy-lang.org/)
 
 [![doc](https://img.shields.io/readthedocs/proxypy/latest?style=flat-square&color=darkgreen)](https://proxypy.readthedocs.io/)
@@ -71,8 +71,15 @@
   - [Plugin Ordering](#plugin-ordering)
 - [End-to-End Encryption](#end-to-end-encryption)
 - [TLS Interception](#tls-interception)
+  - [Insecure TLS Interception](#insecure-tls-interception)
   - [TLS Interception With Docker](#tls-interception-with-docker)
 - [GROUT (NGROK Alternative)](#grout-ngrok-alternative)
+  - [Grout Usage](#grout-usage)
+  - [Grout Authentication](#grout-authentication)
+  - [Grout Paths](#grout-paths)
+  - [Grout Wildcard Domains](#grout-wildcard-domains)
+  - ["Host" Header Based Wildcard Routing](#grout-wildcard-domain-routing-based-upon-host-header)
+  - ["Dynamic" Routing](#grout-client-plugin)
   - [Grout using Docker](#grout-using-docker)
   - [How Grout works](#how-grout-works)
   - [Self-hosted Grout](#self-hosted-grout)
@@ -101,6 +108,7 @@
 - [Run Dashboard](#run-dashboard)
   - [Inspect Traffic](#inspect-traffic)
 - [Chrome DevTools Protocol](#chrome-devtools-protocol)
+- [Prometheus Metrics](#prometheus-metrics)
 - [Frequently Asked Questions](#frequently-asked-questions)
   - [Deploying proxy.py in production](#deploying-proxypy-in-production)
     - [What not to do?](#what-not-to-do)
@@ -1067,7 +1075,7 @@ following `Nginx` config:
 
 ```console
 location /get {
-    proxy_pass http://httpbin.org/get
+    proxy_pass http://httpbin.org/get;
 }
 ```
 
@@ -1085,6 +1093,36 @@ Verify using `curl -v localhost:8899/get`:
   "url": "https://localhost/get"
 }
 ```
+
+#### Rewrite Host Header
+
+With above example, you may sometimes see:
+
+```console
+>
+* Empty reply from server
+* Closing connection
+curl: (52) Empty reply from server
+```
+
+This is happenening because our default reverse proxy plugin `ReverseProxyPlugin` is configured
+with a `http` and a `https` upstream server.  And, by default `ReverseProxyPlugin` preserves the
+original host header.  While this works with `https` upstreams, this doesn't work reliably with
+`http` upstreams.  To work around this problem use the `--rewrite-host-header` flags.
+
+Example:
+
+
+```console
+❯ proxy --enable-reverse-proxy \
+    --plugins proxy.plugin.ReverseProxyPlugin \
+    --rewrite-host-header
+```
+
+This will ensure that `Host` header field is set as `httpbin.org` and works with both `http` and
+`https` upstreams.
+
+> NOTE: Whether to use `--rewrite-host-header` or not depends upon your use-case.
 
 ## Plugin Ordering
 
@@ -1237,6 +1275,13 @@ cached file instead of plain text.
 Now use CA flags with other
 [plugin examples](#plugin-examples) to see them work with `https` traffic.
 
+## Insecure TLS Interception
+
+To intercept TLS traffic from a server using a self-signed certificate
+add the `--insecure-tls-interception` flag to disable mandatory TLS certificate validation.
+
+NOTE: This flag disables certificate check for all servers.
+
 ## TLS Interception With Docker
 
 Important notes about TLS Interception with Docker container:
@@ -1323,7 +1368,10 @@ with TLS Interception:
 
 # GROUT (NGROK Alternative)
 
-`grout` is a drop-in alternative to `ngrok` that comes packaged within `proxy.py`
+1. `grout` is a drop-in alternative for `ngrok` and `frp`
+2. `grout` comes packaged within `proxy.py`
+
+## Grout Usage
 
 ```console
 ❯ grout
@@ -1365,6 +1413,12 @@ EXAMPLES:
   Self-hosted solutions:
     grout tcp://:5432 abhinavsingh.my.server         # Custom URL for Postgres service running locally on port 5432
 
+  (*) Wildcard Domains:
+    grout https://host:443 do.main --wildcard        # Receive traffic on provided domain and all it's subdomains
+
+  (*) Host based routing for Wildcard Domains:
+    grout ... --tunnel-route-url host=https://h:p    # When using wildcards, optionally route traffic by incoming host header
+
 SUPPORT:
   Write to us at support@jaxl.com
 
@@ -1375,12 +1429,107 @@ SUPPORT:
   https://jaxl.io
 ```
 
+## Grout Authentication
+
+Grout supports authentication to protect your files, folders and services from unauthorized
+access.  Use `--basic-auth` flag to enforce authentication.  Example:
+
+```console
+grout /path/to/folder --basic-auth user:pass
+grout https://localhost:8080 --basic-auth u:p
+```
+
+## Grout Paths
+
+By default, Grout allows access to all paths on the services.  Use `--path` flag to restrict
+access to only certain paths on your web service.  Example:
+
+```console
+grout https://localhost:8080 --path /worker/
+grout https://localhost:8080 --path /webhook/ --path /callback/
+```
+
+## Grout Wildcard Domains
+
+By default, Grout client serves incoming traffic on a dedicated subdomain.
+However, some services (e.g. Kubernetes) may want to serve traffic on adhoc subdomains.
+Starting a dedicated Grout client for every adhoc subdomain may not be a practical solution.
+
+For such scenarios, Grout supports wildcard domains.  Here is how to configure your own
+wildcard domain for use with Grout clients.
+
+1. Choose a domain e.g. `custom.example.com`
+2. Your service wants to serve traffic for `custom.example.com` and `*.custom.example.com`
+3. If you plan on using `https://`, you need to setup a load balancer:
+   - Setup a HTTPS load balancer (LB)
+   - Configure LB with certificate generated for `custom.example.com` and `*.custom.example.com`
+   - Point traffic to Grout service public IP addresses
+4. Contact Grout team at support@jaxl.com to whitelist `custom.example.com`.  Grout team will make
+   sure you really own the domain and you have configured a valid SSL certificate as described above
+
+Start Grout with `--wildcard` flag.  Example:
+
+```console
+grout https://localhost:8080 custom.example.com --wildcard
+2024-08-05 18:24:59,294 - grout - Logged in as someone@gmail.com
+2024-08-05 18:25:03,159 - setup - Grouting https://*.custom.domain.com
+```
+
+## Grout Wildcard Domain Routing Based Upon "Host" Header
+
+  > Only available with `--wildcard`
+
+Along with the default route you can also provide additional routes which takes precedence when the host field matches.  Example:
+
+```console
+grout https://localhost:8080 custom.example.com \
+  --wildcard \
+  --tunnel-route-url stream.example.com=http://localhost:7001
+```
+
+You can provide multiple custom routes by repeating this flag.
+
+## Grout Client Plugin
+
+`GroutClientBasePlugin` allows you to dynamically route traffic to different upstreams.  Below is a simple implementation with some description about how to use it.
+
+```python
+class GroutClientPlugin(GroutClientBasePlugin):
+
+    def resolve_route(
+        self,
+        route: str,
+        request: HttpParser,
+        origin: HostPort,
+        server: HostPort,
+    ) -> Tuple[Optional[str], HttpParser]:
+        print(request, origin, server, '->', route)
+        print(request.header(b'host'), request.path)
+        #
+        # Here, we send traffic to localhost:7001 irrespective
+        # of the original "route" value provided to the grout
+        # client OR any custom host:upstream mapping provided
+        # through the --tunnel-route-url flags (when using
+        # --wildcard).
+        #
+        # Optionally, you can also strip path before
+        # sending traffic to upstrem, like:
+        # request.path = b"/"
+        #
+        # To drop the request, simply return None for route
+        # return None, request
+        #
+        return 'http://localhost:7001', request
+```
+
+See [grout_client.py](https://github.com/abhinavsingh/proxy.py/blob/develop/proxy/plugin/grout_client.py) for more information.  To try this out, start by passing `--plugin proxy.plugin.grout_client.GroutClientPlugin` when starting the grout client.
+
 ## Grout using Docker
 
 ```console
-❯ docker run -it \
+❯ docker run --rm -it \
   --entrypoint grout \
-  --rm -v ~/.proxy:/root/.proxy \
+  -v ~/.proxy:/root/.proxy \
   abhinavsingh/proxy.py:latest \
   http://host.docker.internal:29876
 ```
@@ -1411,9 +1560,7 @@ Above:
 
 **This is a WIP and may not work as documented**
 
-Requires `paramiko` to work.
-
-See [requirements-tunnel.txt](https://github.com/abhinavsingh/proxy.py/blob/develop/requirements-tunnel.txt)
+Requires `paramiko` to work.  Install dependencies using `pip install "proxy.py[tunnel]"`
 
 ## Proxy Remote Requests Locally
 
@@ -1955,6 +2102,13 @@ start `proxy.py` as:
 
 Now point your CDT instance to `ws://localhost:8899/devtools`.
 
+# Prometheus Metrics
+
+1) Start `proxy.py` with `--enable-metrics` flag to internal metrics via a prometheus endpoint
+2) Configure your `prometheus.yaml` to scrape from `/metrics` endpoint e.g. [http://localhost:8899/metrics](http://localhost:8899/metrics)
+3) Customize metrics path by using `--metrics-path` flag
+4) NOTE that `--enable-metrics` internally also `--enable-events` and the web server plugin
+
 # Frequently Asked Questions
 
 ## Deploying proxy.py in production
@@ -2430,16 +2584,18 @@ for list of tests.
 
 # Projects Using Proxy.Py
 
-Some of the projects using `proxy.py`
+Some popular projects using `proxy.py`
 
-1. [ray-project](https://github.com/ray-project/ray)
-2. [aio-libs](https://github.com/aio-libs/aiohttp)
-3. [wifipumpkin3](https://github.com/P0cL4bs/wifipumpkin3)
-4. [MerossIot](https://github.com/albertogeniola/MerossIot)
-5. [pyshorteners](https://github.com/ellisonleao/pyshorteners)
-6. [Slack API](https://github.com/slackapi/python-slack-events-api)
-7. [ibeam](https://github.com/Voyz/ibeam)
-8. [PyPaperBot](https://github.com/ferru97/PyPaperBot)
+- [pip](https://github.com/pypa/pip)
+- [ray-project](https://github.com/ray-project/ray)
+- [aio-libs](https://github.com/aio-libs/aiohttp)
+- [Selenium Base](https://github.com/seleniumbase/SeleniumBase)
+- [wifipumpkin3](https://github.com/P0cL4bs/wifipumpkin3)
+- [MerossIot](https://github.com/albertogeniola/MerossIot)
+- [pyshorteners](https://github.com/ellisonleao/pyshorteners)
+- [Slack API](https://github.com/slackapi/python-slack-events-api)
+- [ibeam](https://github.com/Voyz/ibeam)
+- [PyPaperBot](https://github.com/ferru97/PyPaperBot)
 
 For full list see [used by](https://github.com/abhinavsingh/proxy.py/network/dependents?package_id=UGFja2FnZS01MjQ0MDY5Ng%3D%3D)
 
@@ -2457,17 +2613,17 @@ To run standalone benchmark for `proxy.py`, use the following command from repo 
 
 ```console
 ❯ proxy -h
-usage: -m [-h] [--enable-proxy-protocol] [--threadless] [--threaded]
-          [--num-workers NUM_WORKERS] [--enable-events] [--enable-conn-pool]
-          [--key-file KEY_FILE] [--cert-file CERT_FILE]
-          [--client-recvbuf-size CLIENT_RECVBUF_SIZE]
-          [--server-recvbuf-size SERVER_RECVBUF_SIZE]
-          [--max-sendbuf-size MAX_SENDBUF_SIZE] [--timeout TIMEOUT]
-          [--tunnel-hostname TUNNEL_HOSTNAME] [--tunnel-port TUNNEL_PORT]
+usage: -m [-h] [--tunnel-hostname TUNNEL_HOSTNAME] [--tunnel-port TUNNEL_PORT]
           [--tunnel-username TUNNEL_USERNAME]
           [--tunnel-ssh-key TUNNEL_SSH_KEY]
           [--tunnel-ssh-key-passphrase TUNNEL_SSH_KEY_PASSPHRASE]
-          [--tunnel-remote-port TUNNEL_REMOTE_PORT]
+          [--tunnel-remote-port TUNNEL_REMOTE_PORT] [--threadless]
+          [--threaded] [--num-workers NUM_WORKERS] [--enable-events]
+          [--inactive-conn-cleanup-timeout INACTIVE_CONN_CLEANUP_TIMEOUT]
+          [--enable-proxy-protocol] [--enable-conn-pool] [--key-file KEY_FILE]
+          [--cert-file CERT_FILE] [--client-recvbuf-size CLIENT_RECVBUF_SIZE]
+          [--server-recvbuf-size SERVER_RECVBUF_SIZE]
+          [--max-sendbuf-size MAX_SENDBUF_SIZE] [--timeout TIMEOUT]
           [--local-executor LOCAL_EXECUTOR] [--backlog BACKLOG]
           [--hostname HOSTNAME] [--hostnames HOSTNAMES [HOSTNAMES ...]]
           [--port PORT] [--ports PORTS [PORTS ...]] [--port-file PORT_FILE]
@@ -2480,15 +2636,16 @@ usage: -m [-h] [--enable-proxy-protocol] [--threadless] [--threaded]
           [--work-klass WORK_KLASS] [--pid-file PID_FILE] [--openssl OPENSSL]
           [--data-dir DATA_DIR] [--ssh-listener-klass SSH_LISTENER_KLASS]
           [--disable-http-proxy] [--disable-headers DISABLE_HEADERS]
-          [--ca-key-file CA_KEY_FILE] [--ca-cert-dir CA_CERT_DIR]
-          [--ca-cert-file CA_CERT_FILE] [--ca-file CA_FILE]
-          [--ca-signing-key-file CA_SIGNING_KEY_FILE]
+          [--ca-key-file CA_KEY_FILE] [--insecure-tls-interception]
+          [--ca-cert-dir CA_CERT_DIR] [--ca-cert-file CA_CERT_FILE]
+          [--ca-file CA_FILE] [--ca-signing-key-file CA_SIGNING_KEY_FILE]
           [--auth-plugin AUTH_PLUGIN] [--cache-requests]
           [--cache-by-content-type] [--cache-dir CACHE_DIR]
           [--proxy-pool PROXY_POOL] [--enable-web-server]
           [--enable-static-server] [--static-server-dir STATIC_SERVER_DIR]
           [--min-compression-length MIN_COMPRESSION_LENGTH]
-          [--enable-reverse-proxy] [--pac-file PAC_FILE]
+          [--enable-reverse-proxy] [--rewrite-host-header] [--enable-metrics]
+          [--metrics-path METRICS_PATH] [--pac-file PAC_FILE]
           [--pac-file-url-path PAC_FILE_URL_PATH]
           [--cloudflare-dns-mode CLOUDFLARE_DNS_MODE]
           [--filtered-upstream-hosts FILTERED_UPSTREAM_HOSTS]
@@ -2496,13 +2653,25 @@ usage: -m [-h] [--enable-proxy-protocol] [--threadless] [--threaded]
           [--filtered-client-ips FILTERED_CLIENT_IPS]
           [--filtered-url-regex-config FILTERED_URL_REGEX_CONFIG]
 
-proxy.py v2.4.4rc6.dev191+gef5a8922
+proxy.py v2.4.8.dev8+gc703edac.d20241013
 
 options:
   -h, --help            show this help message and exit
-  --enable-proxy-protocol
-                        Default: False. If used, will enable proxy protocol.
-                        Only version 1 is currently supported.
+  --tunnel-hostname TUNNEL_HOSTNAME
+                        Default: None. Remote hostname or IP address to which
+                        SSH tunnel will be established.
+  --tunnel-port TUNNEL_PORT
+                        Default: 22. SSH port of the remote host.
+  --tunnel-username TUNNEL_USERNAME
+                        Default: None. Username to use for establishing SSH
+                        tunnel.
+  --tunnel-ssh-key TUNNEL_SSH_KEY
+                        Default: None. Private key path in pem format
+  --tunnel-ssh-key-passphrase TUNNEL_SSH_KEY_PASSPHRASE
+                        Default: None. Private key passphrase
+  --tunnel-remote-port TUNNEL_REMOTE_PORT
+                        Default: 8899. Remote port which will be forwarded
+                        locally for proxy.
   --threadless          Default: True. Enabled by default on Python 3.8+ (mac,
                         linux). When disabled a new thread is spawned to
                         handle each client connection.
@@ -2514,6 +2683,19 @@ options:
   --enable-events       Default: False. Enables core to dispatch lifecycle
                         events. Plugins can be used to subscribe for core
                         events.
+  --inactive-conn-cleanup-timeout INACTIVE_CONN_CLEANUP_TIMEOUT
+                        Time after which inactive works must be cleaned up.
+                        Increase this value if your backend services are slow
+                        to response or when proxy.py is handling a high
+                        volume. When running proxy.py on Google Cloud (GCP)
+                        you may see 'backend_connection_closed_before_data_sen
+                        t_to_client', with curl clients you may see 'Empty
+                        reply from server' error when '--inactive-conn-
+                        cleanup-timeout' value is low for your use-case.
+                        Default 1 seconds
+  --enable-proxy-protocol
+                        Default: False. If used, will enable proxy protocol.
+                        Only version 1 is currently supported.
   --enable-conn-pool    Default: False. (WIP) Enable upstream connection
                         pooling.
   --key-file KEY_FILE   Default: None. Server key file to enable end-to-end
@@ -2535,21 +2717,6 @@ options:
   --timeout TIMEOUT     Default: 10.0. Number of seconds after which an
                         inactive connection must be dropped. Inactivity is
                         defined by no data sent or received by the client.
-  --tunnel-hostname TUNNEL_HOSTNAME
-                        Default: None. Remote hostname or IP address to which
-                        SSH tunnel will be established.
-  --tunnel-port TUNNEL_PORT
-                        Default: 22. SSH port of the remote host.
-  --tunnel-username TUNNEL_USERNAME
-                        Default: None. Username to use for establishing SSH
-                        tunnel.
-  --tunnel-ssh-key TUNNEL_SSH_KEY
-                        Default: None. Private key path in pem format
-  --tunnel-ssh-key-passphrase TUNNEL_SSH_KEY_PASSPHRASE
-                        Default: None. Private key passphrase
-  --tunnel-remote-port TUNNEL_REMOTE_PORT
-                        Default: 8899. Remote port which will be forwarded
-                        locally for proxy.
   --local-executor LOCAL_EXECUTOR
                         Default: 1. Enabled by default. Use 0 to disable. When
                         enabled acceptors will make use of local (same
@@ -2615,6 +2782,8 @@ options:
                         Default: None. CA key to use for signing dynamically
                         generated HTTPS certificates. If used, must also pass
                         --ca-cert-file and --ca-signing-key-file
+  --insecure-tls-interception
+                        Default: False. Disables certificate verification
   --ca-cert-dir CA_CERT_DIR
                         Default: ~/.proxy/certificates. Directory to store
                         dynamically generated certificates. Also see --ca-key-
@@ -2623,9 +2792,9 @@ options:
                         Default: None. Signing certificate to use for signing
                         dynamically generated HTTPS certificates. If used,
                         must also pass --ca-key-file and --ca-signing-key-file
-  --ca-file CA_FILE     Default: /Users/abhinavsingh/Dev/proxy.py/.venv31013/l
-                        ib/python3.10/site-packages/certifi/cacert.pem.
-                        Provide path to custom CA bundle for peer certificate
+  --ca-file CA_FILE     Default: /Users/abhinavsingh/Dev/proxy.py/.venv3122/li
+                        b/python3.12/site-packages/certifi/cacert.pem. Provide
+                        path to custom CA bundle for peer certificate
                         verification
   --ca-signing-key-file CA_SIGNING_KEY_FILE
                         Default: None. CA signing key to use for dynamic
@@ -2663,6 +2832,13 @@ options:
                         response that will be compressed (gzipped).
   --enable-reverse-proxy
                         Default: False. Whether to enable reverse proxy core.
+  --rewrite-host-header
+                        Default: False. If used, reverse proxy server will
+                        rewrite Host header field before sending to upstream.
+  --enable-metrics      Default: False. Enables metrics.
+  --metrics-path METRICS_PATH
+                        Default: /metrics. Web server path to serve proxy.py
+                        metrics.
   --pac-file PAC_FILE   A file (Proxy Auto Configuration) or string to serve
                         when the server receives a direct file request. Using
                         this option enables proxy.HttpWebServerPlugin.

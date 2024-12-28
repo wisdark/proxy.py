@@ -20,6 +20,7 @@ from typing import (
     cast,
 )
 
+from ...common.flag import flags as proxy_flags
 from ...common.types import Readables, Writables, SelectableEvents
 from ...common.logger import Logger
 from ...common.constants import (
@@ -35,6 +36,20 @@ if TYPE_CHECKING:   # pragma: no cover
 T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
+
+
+proxy_flags.add_argument(
+    '--inactive-conn-cleanup-timeout',
+    default=DEFAULT_INACTIVE_CONN_CLEANUP_TIMEOUT,
+    help='Time after which inactive works must be cleaned up. '
+    + 'Increase this value if your backend services are slow to response '
+    + 'or when proxy.py is handling a high volume. When running proxy.py on Google Cloud (GCP) '
+    + "you may see 'backend_connection_closed_before_data_sent_to_client', with curl clients "
+    + "you may see 'Empty reply from server' error when '--inactive-conn-cleanup-timeout' "
+    + 'value is low for your use-case. Default {0} seconds'.format(
+        DEFAULT_INACTIVE_CONN_CLEANUP_TIMEOUT,
+    ),
+)
 
 
 class Threadless(ABC, Generic[T]):
@@ -87,7 +102,9 @@ class Threadless(ABC, Generic[T]):
             SelectableEvents,
         ] = {}
         self.wait_timeout: float = DEFAULT_WAIT_FOR_TASKS_TIMEOUT
-        self.cleanup_inactive_timeout: float = DEFAULT_INACTIVE_CONN_CLEANUP_TIMEOUT
+        self.cleanup_inactive_timeout: float = float(
+            self.flags.inactive_conn_cleanup_timeout,
+        )
         self._total: int = 0
         # When put at the top, causes circular import error
         # since integrated ssh tunnel was introduced.
@@ -316,10 +333,17 @@ class Threadless(ABC, Generic[T]):
                 self.selector.unregister(fileno)
             self.registered_events_by_work_ids[work_id].clear()
             del self.registered_events_by_work_ids[work_id]
-        self.works[work_id].shutdown()
-        del self.works[work_id]
-        if self.work_queue_fileno() is not None:
-            os.close(work_id)
+        try:
+            self.works[work_id].shutdown()
+        except Exception as exc:
+            logger.exception(
+                'Error when shutting down work#{0}'.format(work_id),
+                exc_info=exc,
+            )
+        finally:
+            del self.works[work_id]
+            if self.work_queue_fileno() is not None:
+                os.close(work_id)
 
     def _create_tasks(
             self,

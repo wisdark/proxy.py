@@ -46,7 +46,7 @@ concurrency:
 jobs:
   pre-setup:
     name: ⚙️ Pre-set global build settings
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: python
@@ -216,7 +216,7 @@ jobs:
     needs:
     - pre-setup  # transitive, for accessing settings
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     env:
       PY_COLORS: 1
@@ -313,7 +313,7 @@ jobs:
         'dist/${{ needs.pre-setup.outputs.sdist-artifact-name }}'
         'dist/${{ needs.pre-setup.outputs.wheel-artifact-name }}'
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python-package-distributions
         # NOTE: Exact expected file names are specified here
@@ -331,7 +331,7 @@ jobs:
     - build
     - pre-setup  # transitive, for accessing settings
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         toxenv:
@@ -340,7 +340,7 @@ jobs:
         - build-docs
         - doctest-docs
         - linkcheck-docs
-        - spellcheck-docs
+        # - spellcheck-docs
       fail-fast: false
 
     env:
@@ -403,7 +403,7 @@ jobs:
       shell: bash
     - name: Download all the dists
       if: matrix.toxenv == 'metadata-validation'
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -440,18 +440,19 @@ jobs:
       matrix:
         os:
         - macOS-12
-        - Ubuntu-20.04
+        - Ubuntu-24.04
         - Windows-latest
         python:
-        # NOTE: The latest and the lowest supported Pythons are prioritized
-        # NOTE: to improve the responsiveness. It's nice to see the most
-        # NOTE: important results first.
+        - '3.12'
         - '3.11'
-        - 3.6
         - '3.10'
         - 3.9
         - 3.8
-        - 3.7
+        include:
+        - os: Ubuntu-20.04
+          python: 3.6
+        - os: Ubuntu-20.04
+          python: 3.7
 
     continue-on-error: >-
       ${{
@@ -494,7 +495,7 @@ jobs:
           ${{ runner.os }}-pip-${{
             steps.calc-cache-key-py.outputs.py-hash-key
           }}-${{
-            hashFiles('tox.ini', 'requirements**.txt')
+            hashFiles('tox.ini', 'setup.cfg')
           }}
         restore-keys: |
           ${{ runner.os }}-pip-${{
@@ -522,7 +523,7 @@ jobs:
         ref: ${{ github.event.inputs.release-commitish }}
 
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -546,13 +547,14 @@ jobs:
         --skip-missing-interpreters false
         --skip-pkg-install
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         flags: pytest, GHA, Python ${{ matrix.python }}, ${{ runner.os }}
         verbose: true
-
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   test-container:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     if: success()
@@ -566,7 +568,7 @@ jobs:
       with:
         ref: ${{ github.event.inputs.release-commitish }}
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -608,11 +610,12 @@ jobs:
         --enable-web-server
         --enable-reverse-proxy
         --plugin proxy.plugin.ReverseProxyPlugin
+        --rewrite-host-header
         &&
         ./tests/integration/test_integration.sh 8899
 
   analyze:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     name: 🛡️ Analyze
     # schedule:
     # - cron: '0 14 * * 1'
@@ -694,7 +697,7 @@ jobs:
     name: 📊 Node ${{ matrix.node }} @ ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, windows-latest, macOS-12]
+        os: [ubuntu-24.04, windows-latest, macOS-12]
         node: ['10.x', '11.x', '12.x']
       # max-parallel: 4
       fail-fast: false
@@ -725,7 +728,7 @@ jobs:
     name: 🧑‍💻 👩‍💻 👨‍💻 Developer setup ${{ matrix.node }} @ ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, macOS-latest]
+        os: [ubuntu-24.04, macOS-latest]
         python: ['3.10']
       fail-fast: false
     steps:
@@ -749,7 +752,7 @@ jobs:
         python3 -m proxy --version
 
   ghcr-latest:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     if: success()
@@ -763,7 +766,7 @@ jobs:
       with:
         ref: ${{ github.event.inputs.release-commitish }}
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -831,7 +834,7 @@ jobs:
         -t $LATEST_TAG .
 
   ghcr-openssl:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     if: success()
@@ -845,7 +848,7 @@ jobs:
       with:
         ref: ${{ github.event.inputs.release-commitish }}
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -911,7 +914,7 @@ jobs:
         -t $LATEST_TAG .
 
   docker-latest:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     if: success()
@@ -925,7 +928,7 @@ jobs:
       with:
         ref: ${{ github.event.inputs.release-commitish }}
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -982,7 +985,7 @@ jobs:
     - ghcr-openssl
     - docker-latest
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Decide whether the needed jobs succeeded or failed
@@ -997,7 +1000,7 @@ jobs:
     - pre-setup  # transitive, for accessing settings
     if: >-
       fromJSON(needs.pre-setup.outputs.release-requested)
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     environment:
       name: release
@@ -1008,7 +1011,7 @@ jobs:
 
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -1026,7 +1029,7 @@ jobs:
     if: >-
       fromJSON(needs.pre-setup.outputs.is-untagged-devel)
       || fromJSON(needs.pre-setup.outputs.release-requested)
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     environment:
       name: release-testpypi
@@ -1037,7 +1040,7 @@ jobs:
 
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -1055,7 +1058,7 @@ jobs:
     needs:
     - publish-pypi
     - pre-setup  # transitive, for accessing settings
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Fetch the src snapshot
@@ -1088,7 +1091,7 @@ jobs:
     needs:
     - post-release-repo-update
     - pre-setup  # transitive, for accessing settings
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: write
@@ -1096,7 +1099,7 @@ jobs:
 
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/

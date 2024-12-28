@@ -12,11 +12,13 @@
 
        utils
 """
+import os
 import ssl
 import sys
 import socket
 import logging
 import argparse
+import tempfile
 import functools
 import ipaddress
 import contextlib
@@ -26,7 +28,7 @@ from typing import Any, Dict, List, Type, Tuple, Callable, Optional
 from .types import HostPort
 from .constants import (
     CRLF, COLON, HTTP_1_1, IS_WINDOWS, WHITESPACE, DEFAULT_TIMEOUT,
-    DEFAULT_THREADLESS, PROXY_AGENT_HEADER_VALUE,
+    DEFAULT_THREADLESS, PROXY_AGENT_HEADER_VALUE, DEFAULT_SSL_CONTEXT_OPTIONS,
 )
 
 
@@ -34,6 +36,26 @@ if not IS_WINDOWS:  # pragma: no cover
     import resource
 
 logger = logging.getLogger(__name__)
+
+
+def cert_der_to_dict(der: Optional[bytes]) -> Dict[str, Any]:
+    """Parse a DER formatted certificate to a python dict"""
+    # pylint: disable=import-outside-toplevel
+    import _ssl  # noqa: WPS436
+
+    if not der:
+        return {}
+    with tempfile.NamedTemporaryFile(delete=False) as cert_file:
+        pem = ssl.DER_cert_to_PEM_cert(der)
+        cert_file.write(pem.encode())
+        cert_file.flush()
+        cert_file.seek(0)
+    try:
+        certificate = _ssl._test_decode_cert(cert_file.name)
+    finally:
+        cert_file.close()
+        os.remove(cert_file.name)
+    return certificate or {}
 
 
 def tls_interception_enabled(flags: argparse.Namespace) -> bool:
@@ -219,20 +241,11 @@ def wrap_socket(
         cafile: Optional[str] = None,
 ) -> ssl.SSLSocket:
     """Use this to upgrade server_side socket to TLS."""
-    ctx = ssl.create_default_context(
-        ssl.Purpose.CLIENT_AUTH,
-        cafile=cafile,
-    )
-    ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3 | ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=cafile)
+    ctx.options |= DEFAULT_SSL_CONTEXT_OPTIONS
     ctx.verify_mode = ssl.CERT_NONE
-    ctx.load_cert_chain(
-        certfile=certfile,
-        keyfile=keyfile,
-    )
-    return ctx.wrap_socket(
-        conn,
-        server_side=True,
-    )
+    ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    return ctx.wrap_socket(conn, server_side=True)
 
 
 def new_socket_connection(
@@ -310,6 +323,7 @@ def set_open_file_limit(soft_limit: int) -> None:
     if IS_WINDOWS:  # pragma: no cover
         return
 
+    # pylint: disable=possibly-used-before-assignment
     curr_soft_limit, curr_hard_limit = resource.getrlimit(
         resource.RLIMIT_NOFILE,
     )
